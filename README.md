@@ -53,284 +53,110 @@ const lumResult = analyzeLuminanceBlur(yPlane, 1200, 1600, { locale: "en" });
 const jpegResult = analyzeJpegBase64Blur(jpegBase64, { locale: "en" });
 ```
 
-### 2. Multi-page PDFs on React Native (Expo or Bare RN)
+### 2. Images & Multi-page PDFs (`rn-doc-blur-detector/pdf`)
 
-In your host app, wire `PDF_WEBVIEW_HTML` and `createPdfBridgeController()` to a hidden `<WebView>` from `react-native-webview`.
+#### Images
 
-If your app also targets **Web**, keep `react-native-webview` out of the Web bundle by splitting a `.web.tsx` stub:
+`analyzeImage` (or `extractImagePage`) decodes a JPEG `uri` or `base64` payload into RGBA and runs Laplacian analysis:
+
+```ts
+import { analyzeImage } from "rn-doc-blur-detector/pdf";
+
+const { analysis, page } = await analyzeImage(
+  { uri: imageUri, base64: optionalJpegBase64 },
+  { config: { locale: "en" } },
+);
+```
+
+> On React Native, non-JPEG URIs without a `base64` payload (e.g. PNG/HEIC) require a custom `extractImageAdapter` option (for example using Skia, `@bam.tech/react-native-image-resizer`, or `expo-image-manipulator`). On Web, `HTMLCanvasElement` handles all browser-supported formats automatically.
+
+#### PDFs on React Native (iOS & Android)
+
+Mount a hidden `<WebView>` from `react-native-webview` wired to `PDF_WEBVIEW_HTML` and `createPdfBridgeController()`, then pass `runJob` into `analyzePdf` (or `extractPdfPages`):
 
 ```tsx
-// pdf-render-bridge.tsx (iOS & Android)
-import {
-  type ComponentType,
-  forwardRef,
-  type RefAttributes,
-  useCallback,
-  useImperativeHandle,
-  useMemo,
-  useRef,
-} from "react";
-import { StyleSheet, View } from "react-native";
+import { type ComponentType, type RefAttributes, useMemo, useRef } from "react";
+import { View } from "react-native";
 import WebView, {
   type WebViewMessageEvent,
   type WebViewProps,
 } from "react-native-webview";
 import {
+  analyzePdf,
   createPdfBridgeController,
   PDF_WEBVIEW_HTML,
-  type PdfBridgeRunner,
 } from "rn-doc-blur-detector/pdf";
 
 interface WebViewRefHandle {
   injectJavaScript: (script: string) => void;
 }
 
-// react-native-webview's WebView is typed as FunctionComponent<WebViewProps>,
+// react-native-webview declares WebView as FunctionComponent<WebViewProps>,
 // so cast it with RefAttributes for React 18/19 + TypeScript compatibility.
 const TypedWebView = WebView as unknown as ComponentType<
   WebViewProps & RefAttributes<WebViewRefHandle>
 >;
 
-export interface PdfRenderBridgeHandle {
-  runPdfJob: PdfBridgeRunner;
-}
+// Inside your component:
+const webViewRef = useRef<WebViewRefHandle>(null);
+const pdfBridge = useMemo(() => createPdfBridgeController(), []);
 
-export const PdfRenderBridge = forwardRef<PdfRenderBridgeHandle>(
-  function PdfRenderBridge(_props, ref) {
-    const webViewRef = useRef<WebViewRefHandle>(null);
-    const controller = useMemo(() => createPdfBridgeController(), []);
+const analyzeSelectedPdf = async (pdfUri: string) => {
+  return analyzePdf(
+    { uri: pdfUri }, // or { uri: "", base64 }
+    {
+      maxPages: 2, // pass Infinity for all pages
+      config: { locale: "en" },
+      // Optional on iOS/Android: omit to use built-in fetch + FileReader for file:// and content:// URIs
+      // readFileAsBase64: (uri) => ...,
+      renderPdfViaBridge: (params) =>
+        pdfBridge.runJob(params, (script) => {
+          if (!webViewRef.current) {
+            throw new Error("PDF WebView is not mounted.");
+          }
+          webViewRef.current.injectJavaScript(script);
+        }),
+    },
+  );
+};
 
-    const handleMessage = useCallback(
-      (event: WebViewMessageEvent) => {
-        controller.handleMessage(event.nativeEvent.data);
-      },
-      [controller],
-    );
-
-    useImperativeHandle(
-      ref,
-      () => ({
-        runPdfJob: (params) =>
-          controller.runJob(params, (script) => {
-            if (!webViewRef.current) {
-              throw new Error("PDF WebView is not mounted.");
-            }
-            webViewRef.current.injectJavaScript(script);
-          }),
-      }),
-      [controller],
-    );
-
-    return (
-      <View pointerEvents="none" style={styles.hiddenWrap}>
-        <TypedWebView
-          ref={webViewRef}
-          source={{ html: PDF_WEBVIEW_HTML }}
-          originWhitelist={["*"]}
-          javaScriptEnabled
-          onMessage={handleMessage}
-          style={styles.hiddenWebView}
-        />
-      </View>
-    );
-  },
-);
-
-const styles = StyleSheet.create({
-  hiddenWrap: {
+// Render the hidden WebView in your JSX:
+<View
+  pointerEvents="none"
+  style={{
     position: "absolute",
     width: 1,
     height: 1,
     opacity: 0,
     overflow: "hidden",
-  },
-  hiddenWebView: { width: 1, height: 1 },
-});
-```
-
-```tsx
-// pdf-render-bridge.web.tsx (Web stub — avoids bundling react-native-webview)
-import { forwardRef, useImperativeHandle } from "react";
-import type { PdfBridgeRunner } from "rn-doc-blur-detector/pdf";
-
-export interface PdfRenderBridgeHandle {
-  runPdfJob?: PdfBridgeRunner;
-}
-
-export const PdfRenderBridge = forwardRef<PdfRenderBridgeHandle>(
-  function PdfRenderBridge(_props, ref) {
-    useImperativeHandle(ref, () => ({}), []);
-    return null;
-  },
-);
-```
-
-Then call `analyzePdf` (or `extractPdfPages`):
-
-```ts
-import { analyzePdf } from "rn-doc-blur-detector/pdf";
-
-const result = await analyzePdf(
-  { uri: pdfUri }, // or { uri: "", base64 }
-  {
-    maxPages: 2,
-    config: { locale: "en" },
-    renderPdfViaBridge: pdfBridgeRef.current?.runPdfJob, // ignored on Web
-    // Optional on iOS/Android: omit to use built-in fetch + FileReader for file:// and content:// URIs
-    // readFileAsBase64: (uri) => ...,
-  },
-);
+  }}
+>
+  <TypedWebView
+    ref={webViewRef}
+    source={{ html: PDF_WEBVIEW_HTML }}
+    originWhitelist={["*"]}
+    javaScriptEnabled
+    onMessage={(e: WebViewMessageEvent) =>
+      pdfBridge.handleMessage(e.nativeEvent.data)
+    }
+    style={{ width: 1, height: 1 }}
+  />
+</View>;
 ```
 
 - **iOS & Android:** `PDF_WEBVIEW_HTML` automatically resolves `pdf-webview-html.native.js`, loading the vendored offline `pdfjs-dist@4.10.38` bundle via `Blob` URLs.
-- **Web:** `extractImagePage` / `extractPdfPages` / `analyzePdf` use `HTMLCanvasElement` and `pdfjs-dist@4.10.38` via jsDelivr CDN (and `pdf-webview-html.js` also uses the CDN fallback).
+- **Web:** `extractImagePage` / `extractPdfPages` / `analyzePdf` use `HTMLCanvasElement` and `pdfjs-dist@4.10.38` via jsDelivr CDN (`renderPdfViaBridge` is ignored). If your app also targets Web, keep `react-native-webview` out of the Web bundle with a `.web.tsx` stub.
+- **Full Bare RN example:** see [`rn-doc-blur-detector-demo`](https://github.com/carlosxfelipe/rn-doc-blur-detector-demo) for a complete React Native CLI app using `react-native-image-picker` and `@react-native-documents/picker`.
 
-### 3. Bare React Native Pattern (without Expo)
+### 3. Document Helpers (`buildAnalyzedDocument`, `validateFileSize`, `isPdfAsset`, `isImageAsset`)
 
-Because `rn-doc-blur-detector` has zero `expo-*` dependencies, Bare React Native apps can analyze camera/gallery photos and PDFs without `expo-image-manipulator` or `expo-file-system`:
-
-```ts
-import { launchImageLibrary } from "react-native-image-picker";
-import { pick, keepLocalCopy, types } from "@react-native-documents/picker";
-import { DEFAULT_LAPLACIAN_CONFIG } from "rn-doc-blur-detector";
-import { analyzeImage, analyzePdf } from "rn-doc-blur-detector/pdf";
-
-// 1) Images: let the native picker resize and output a compatible JPEG base64 payload
-const imgRes = await launchImageLibrary({
-  mediaType: "photo",
-  maxWidth: DEFAULT_LAPLACIAN_CONFIG.maxAnalysisDim,
-  maxHeight: DEFAULT_LAPLACIAN_CONFIG.maxAnalysisDim,
-  quality: 1,
-  includeBase64: true,
-  assetRepresentationMode: "compatible", // avoids HEIC on iOS
-});
-const asset = imgRes.assets?.[0];
-if (asset?.uri) {
-  const { analysis } = await analyzeImage(
-    {
-      uri: asset.uri,
-      width: asset.width,
-      height: asset.height,
-      base64: asset.base64,
-    },
-    { config: { locale: "en" } },
-  );
-  console.log(analysis.status, analysis.score);
-}
-
-// 2) PDFs: copy to local cache and pass the URI directly (built-in fetch + FileReader reads it)
-const [picked] = await pick({ type: [types.pdf] });
-if (picked) {
-  const [copied] = await keepLocalCopy({
-    files: [{ uri: picked.uri, fileName: picked.name ?? "document.pdf" }],
-    destination: "cachesDirectory",
-  });
-  const localUri = copied.status === "success" ? copied.localUri : picked.uri;
-
-  const pdfResult = await analyzePdf(
-    { uri: localUri },
-    {
-      maxPages: 2,
-      config: { locale: "en" },
-      // From <PdfRenderBridge ref={pdfBridgeRef} /> mounted in your component tree
-      renderPdfViaBridge: pdfBridgeRef.current?.runPdfJob,
-    },
-  );
-  console.log(pdfResult.summary);
-}
-```
-
-> For non-JPEG image URIs without a `base64` payload on Bare React Native (e.g. PNG/HEIC from a document picker), pass a custom `extractImageAdapter` (such as `@bam.tech/react-native-image-resizer` or Skia) to `extractImagePage` / `analyzeImage`.
-
-### 4. Expo Adapter Pattern (Recommended for Large Camera Photos / HEIC / PNG)
-
-Expo apps can resize large camera photos natively (and convert PNG/HEIC/WebP to JPEG) using `expo-image-manipulator` + `expo-file-system`:
-
-```ts
-// document-loader.ts (in your Expo app)
-import { File } from "expo-file-system";
-import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
-import { Platform } from "react-native";
-import {
-  DEFAULT_LAPLACIAN_CONFIG,
-  decodeJpegBase64ToRgba,
-} from "rn-doc-blur-detector";
-import {
-  extractImagePage as extractImagePageFromPkg,
-  extractPdfPages as extractPdfPagesFromPkg,
-  type ExtractedDocumentPage,
-  type ImageSourceInput,
-  type PdfExtractOptions,
-  type PdfSourceInput,
-} from "rn-doc-blur-detector/pdf";
-
-export async function extractImagePage(
-  source: ImageSourceInput,
-  maxDim = DEFAULT_LAPLACIAN_CONFIG.maxAnalysisDim,
-): Promise<ExtractedDocumentPage> {
-  if (Platform.OS === "web") {
-    return extractImagePageFromPkg(source, maxDim);
-  }
-
-  const context = ImageManipulator.manipulate(source.uri);
-  const knownLongest =
-    source.width && source.height
-      ? Math.max(source.width, source.height)
-      : undefined;
-  if (!knownLongest || knownLongest > maxDim) {
-    const resizeTarget =
-      source.width && source.height && source.height > source.width
-        ? { height: maxDim }
-        : { width: maxDim };
-    context.resize(resizeTarget);
-  }
-  const rendered = await context.renderAsync();
-  const saved = await rendered.saveAsync({
-    format: SaveFormat.JPEG,
-    compress: 1,
-    base64: true,
-  });
-
-  if (!saved.base64) {
-    throw new Error("Could not extract pixels from the selected image.");
-  }
-
-  const rgba = decodeJpegBase64ToRgba(saved.base64);
-  return {
-    pageNumber: 1,
-    width: rgba.width,
-    height: rgba.height,
-    rgba,
-    previewUri: saved.uri,
-    hasVectorText: false,
-    textItemCount: 0,
-  };
-}
-
-export async function extractPdfPages(
-  source: PdfSourceInput,
-  options: PdfExtractOptions = {},
-) {
-  if (Platform.OS === "web") {
-    return extractPdfPagesFromPkg(source, options);
-  }
-
-  return extractPdfPagesFromPkg(source, {
-    ...options,
-    readFileAsBase64: (uri) => new File(uri).base64(),
-  });
-}
-```
-
-### 5. Document Helpers (`buildAnalyzedDocument`, `validateFileSize`, `isPdfAsset`, `isImageAsset`)
-
-`rn-doc-blur-detector/pdf` also provides pure TypeScript helpers to assemble multi-page document summaries and validate assets:
+When using `extractImagePage` / `extractPdfPages` directly (for instance, to keep rendered page previews alongside scores), assemble the document summary and validate assets with the built-in helpers:
 
 ```ts
 import {
   buildAnalyzedDocument,
   DEFAULT_MAX_FILE_SIZE_MB,
-  isImageAsset,
+  extractPdfPages,
   isPdfAsset,
   validateFileSize,
 } from "rn-doc-blur-detector/pdf";
@@ -340,7 +166,11 @@ if (!sizeCheck.valid) {
   throw new Error(`File too large: ${sizeCheck.formattedSize}`);
 }
 
-// `extractedPdf` from `await extractPdfPages(...)`
+const extractedPdf = await extractPdfPages(
+  { uri: file.uri },
+  { renderPdfViaBridge },
+);
+
 const analyzed = buildAnalyzedDocument(
   {
     id: `${Date.now()}`,
@@ -359,30 +189,11 @@ const analyzed = buildAnalyzedDocument(
 
 ## Configuration & Limits
 
-### PDF Page Limit (`maxPages`)
-
-Both `extractPdfPages` and `analyzePdf` default to `maxPages: 2`. Pass any number—or `Infinity` to process all pages:
-
-```ts
-const result = await analyzePdf(
-  { uri: pdfUri },
-  {
-    maxPages: 10, // or Infinity for all pages
-    targetMaxDim: 1400,
-    renderPdfViaBridge: pdfBridgeRef.current?.runPdfJob,
-  },
-);
-```
-
-### File Size Limit (`validateFileSize`)
-
-`extractImagePage`, `extractPdfPages`, `analyzeImage`, and `analyzePdf` do **not** hard-block files by size. Use `validateFileSize(sizeBytes, maxSizeMb)` (defaults to `DEFAULT_MAX_FILE_SIZE_MB = 9`, or pass `0` / `Infinity` to disable) when you want a pre-flight check.
+- **PDF Page Limit (`maxPages` & `targetMaxDim`):** Both `extractPdfPages` and `analyzePdf` default to `maxPages: 2` and `targetMaxDim: 1400` (`DEFAULT_LAPLACIAN_CONFIG.maxAnalysisDim`). Pass any number—or `Infinity` to process all pages.
+- **File Size Limit (`validateFileSize`):** `extractImagePage`, `extractPdfPages`, `analyzeImage`, and `analyzePdf` do **not** hard-block files by size. Use `validateFileSize(sizeBytes, maxSizeMb)` (defaults to `DEFAULT_MAX_FILE_SIZE_MB = 9`, or pass `0` / `Infinity` to disable) for pre-flight checks.
+- **WebView Controller Timeouts & Cancellation:** `createPdfBridgeController({ readyTimeoutMs, jobTimeoutMs })` defaults to `readyTimeoutMs: 10000` and `jobTimeoutMs: 30000`, and exposes `cancel(reason?)` and `reset()`.
 
 > **Performance note:** On iOS/Android, each PDF page is rasterized in the hidden WebView and passed back as a JPEG Base64 string. Raising `maxPages` or processing very large PDFs increases memory usage and processing time proportionally.
-
-### WebView Controller Timeouts & Cancellation
-
-`createPdfBridgeController({ readyTimeoutMs, jobTimeoutMs })` defaults to `readyTimeoutMs: 10000` and `jobTimeoutMs: 30000`, and exposes `cancel(reason?)` and `reset()`.
 
 ---
 
@@ -403,3 +214,9 @@ npm run pack:check   # preview package contents without creating a .tgz
 npm run tarball      # typecheck, test, build, and generate the .tgz tarball
 npm publish --access public
 ```
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
+
+Copyright (c) 2026 **Carlos Felipe Araújo**.
