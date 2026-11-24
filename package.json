@@ -1,0 +1,65 @@
+{
+  "name": "rn-doc-blur-detector",
+  "version": "1.0.0",
+  "description": "Client-side document and image blur detector core for React Native and Web.",
+  "main": "./lib/commonjs/index.js",
+  "module": "./lib/module/index.js",
+  "react-native": "./lib/module/index.js",
+  "types": "./lib/typescript/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./lib/typescript/index.d.ts",
+      "react-native": "./lib/module/index.js",
+      "module": "./lib/module/index.js",
+      "require": "./lib/commonjs/index.js",
+      "default": "./lib/commonjs/index.js"
+    },
+    "./pdf": {
+      "types": "./lib/typescript/pdf/index.d.ts",
+      "react-native": "./lib/module/pdf/index.js",
+      "browser": "./lib/module/pdf/index.js",
+      "module": "./lib/module/pdf/index.js",
+      "require": "./lib/commonjs/pdf/index.js",
+      "default": "./lib/commonjs/pdf/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "pdf",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "node scripts/build.mjs",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "pack:check": "npm run build && npm pack --dry-run",
+    "tarball": "npm run typecheck && npm test && npm pack",
+    "prepublishOnly": "npm run typecheck && npm test"
+  },
+  "keywords": [
+    "react-native",
+    "expo",
+    "blur-detector",
+    "blur-detection",
+    "laplacian-variance",
+    "document-scanner",
+    "pdf",
+    "pdfjs",
+    "image-quality",
+    "sharpness",
+    "typescript"
+  ],
+  "author": "Carlos Felipe Araujo <carlosxfelipe@gmail.com>",
+  "license": "MIT",
+  "dependencies": {
+    "jpeg-js": "^0.4.4"
+  },
+  "devDependencies": {
+    "@types/jpeg-js": "^0.3.0",
+    "typescript": "~5.8.3"
+  }
+}

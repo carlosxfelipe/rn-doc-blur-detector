@@ -1,0 +1,8 @@
+{
+  "name": "rn-doc-blur-detector/pdf",
+  "private": true,
+  "main": "../lib/commonjs/pdf/index.js",
+  "module": "../lib/module/pdf/index.js",
+  "react-native": "../lib/module/pdf/index.js",
+  "types": "../lib/typescript/pdf/index.d.ts"
+}
