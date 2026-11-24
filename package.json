@@ -29,8 +29,11 @@
     "lib",
     "pdf",
     "src",
+    "!src/pdf/vendor",
+    "!src/pdf/vendor/**",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -57,6 +60,14 @@
   "license": "MIT",
   "dependencies": {
     "jpeg-js": "^0.4.4"
+  },
+  "peerDependencies": {
+    "react-native-webview": ">=13.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react-native-webview": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/jpeg-js": "^0.3.0",

@@ -82,4 +82,20 @@ writeFileSync(
   }),
 );
 
+// Deduplicate the 2.3MB vendored PDF.js payload by re-exporting the CommonJS build from ESM.
+writeFileSync(
+  path.join(libDir, "module", "pdf", "vendor", "pdfjs-bundle.js"),
+  [
+    'export {',
+    '  PDFJS_LIB_BASE64,',
+    '  PDFJS_WORKER_BASE64,',
+    '} from "../../../commonjs/pdf/vendor/pdfjs-bundle.js";',
+    "",
+  ].join("\n"),
+);
+rmSync(
+  path.join(libDir, "module", "pdf", "vendor", "pdfjs-bundle.js.map"),
+  { force: true },
+);
+
 console.log("Build completed successfully in lib/{commonjs,module,typescript}");

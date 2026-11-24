@@ -219,4 +219,6 @@ npm publish --access public
 
 This project is licensed under the [MIT License](LICENSE).
 
+The PDF submodule (`rn-doc-blur-detector/pdf`) bundles [pdfjs-dist](https://github.com/mozilla/pdf.js) (`4.10.38`), licensed under the **Apache License 2.0** — see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 Copyright (c) 2026 **Carlos Felipe Araújo**.
