@@ -13,11 +13,16 @@ Zero `.tsx` files, zero coupled UI, and zero `expo-*` dependencies.
 
 ## Installation
 
+Install directly from GitHub (`prepare` automatically builds `lib/` during Git installs on npm/Yarn/pnpm):
+
 ```bash
-npm install rn-doc-blur-detector
+npm install github:carlosxfelipe/rn-doc-blur-detector
 ```
 
-> If you plan to render PDFs on iOS/Android via `rn-doc-blur-detector/pdf`, also install `react-native-webview` in your host app (and run `cd ios && pod install` on Bare React Native iOS).
+Or generate a local tarball with `npm run tarball` and install the `.tgz` file directly in your project.
+
+> - If you plan to render PDFs on iOS/Android via `rn-doc-blur-detector/pdf`, also install `react-native-webview` in your host app (and run `cd ios && pod install` on Bare React Native iOS).
+> - When installing directly from GitHub with **Bun**, allow lifecycle scripts for `rn-doc-blur-detector` (via `trustedDependencies`) or install from a `.tgz` tarball so `lib/` is available.
 
 ---
 
@@ -204,15 +209,14 @@ const analyzed = buildAnalyzedDocument(
 - `borderline`: `40 <= score < 60`
 - `sharp`: `score >= 60`
 
-## Build, Test & Publishing
+## Build, Test & Packaging
 
 ```bash
-npm install
+npm install          # also runs `prepare` -> `npm run build`
 npm run typecheck
 npm test
 npm run pack:check   # preview package contents without creating a .tgz
 npm run tarball      # typecheck, test, build, and generate the .tgz tarball
-npm publish --access public
 ```
 
 ## License

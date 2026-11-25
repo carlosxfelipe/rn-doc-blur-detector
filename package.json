@@ -38,6 +38,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "node scripts/build.mjs",
+    "prepare": "npm run build",
     "test": "npm run build && node --test tests/*.test.mjs",
     "pack:check": "npm run build && npm pack --dry-run",
     "tarball": "npm run typecheck && npm test && npm pack",
@@ -58,6 +59,17 @@
   ],
   "author": "Carlos Felipe Araujo <carlosxfelipe@gmail.com>",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/carlosxfelipe/rn-doc-blur-detector.git"
+  },
+  "homepage": "https://github.com/carlosxfelipe/rn-doc-blur-detector#readme",
+  "bugs": {
+    "url": "https://github.com/carlosxfelipe/rn-doc-blur-detector/issues"
+  },
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
     "jpeg-js": "^0.4.4"
   },
