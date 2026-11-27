@@ -34,6 +34,7 @@ Works everywhere (Expo, Bare React Native, Web, Node.js):
 
 ```ts
 import {
+  analyzeDocumentFraming,
   analyzeGlobalLaplacianBlur,
   analyzeJpegBase64Blur,
   analyzeLuminanceBlur,
@@ -48,7 +49,18 @@ const rgbaResult = analyzeGlobalLaplacianBlur(
   },
   {
     locale: "en", // "en" or "pt-BR" (default: "pt-BR"), or pass custom `messages`
+    framing: "auto", // optional: "off" | "auto" | "a4" | "id-card" | DocumentFramingConfig
   },
+);
+
+// Or evaluate document framing directly (area coverage, clipped edges, skew, aspect ratio)
+const framingResult = analyzeDocumentFraming(
+  {
+    width: 1200,
+    height: 1600,
+    data: rgbaUint8Array,
+  },
+  "id-card",
 );
 
 // Directly from a grayscale luminance buffer (e.g. Y-plane from VisionCamera Frame Processors)

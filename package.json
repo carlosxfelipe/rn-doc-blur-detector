@@ -1,6 +1,6 @@
 {
   "name": "rn-doc-blur-detector",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Client-side document and image blur detector core for React Native and Web.",
   "main": "./lib/commonjs/index.js",
   "module": "./lib/module/index.js",

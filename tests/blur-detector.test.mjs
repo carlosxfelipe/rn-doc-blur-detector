@@ -314,3 +314,90 @@ test("PDF_WEBVIEW_HTML uses vendored offline PDF.js on native and CDN on web", (
   assert.match(cjsPdf.PDF_WEBVIEW_HTML, /cdn\.jsdelivr\.net/);
   assert.doesNotMatch(cjsPdf.PDF_WEBVIEW_HTML, /base64ToJsBlobUrl/);
 });
+
+function createFramedBuffer(width, height, bgRgb) {
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = bgRgb[0];
+    data[i + 1] = bgRgb[1];
+    data[i + 2] = bgRgb[2];
+    data[i + 3] = 255;
+  }
+  return { width, height, data };
+}
+
+function drawDocumentRect(buf, x0, y0, x1, y1, docRgb) {
+  const { width, height, data } = buf;
+  const cx0 = Math.max(0, Math.round(x0));
+  const cy0 = Math.max(0, Math.round(y0));
+  const cx1 = Math.min(width - 1, Math.round(x1));
+  const cy1 = Math.min(height - 1, Math.round(y1));
+
+  for (let y = cy0; y <= cy1; y++) {
+    for (let x = cx0; x <= cx1; x++) {
+      const idx = (y * width + x) * 4;
+      const inInnerTextBand =
+        x > cx0 + 8 &&
+        x < cx1 - 8 &&
+        y > cy0 + 8 &&
+        y < cy1 - 8 &&
+        y % 12 < 3 &&
+        x % 5 < 3;
+      data[idx] = inInnerTextBand ? 30 : docRgb[0];
+      data[idx + 1] = inInnerTextBand ? 30 : docRgb[1];
+      data[idx + 2] = inInnerTextBand ? 30 : docRgb[2];
+      data[idx + 3] = 255;
+    }
+  }
+}
+
+test("analyzeDocumentFraming evaluates A4, ID cards, clipped edges, and full-page scans", () => {
+  const blank = createSolidRgba(120, 120, 245, 245, 245);
+  assert.equal(cjsCore.analyzeDocumentFraming(blank, "auto").status, "insufficient");
+
+  const a4 = createFramedBuffer(240, 300, [35, 30, 25]);
+  drawDocumentRect(a4, 45, 44, 195, 256, [246, 246, 246]);
+  const a4Res = cjsCore.analyzeDocumentFraming(a4, "a4");
+  assert.equal(a4Res.status, "good");
+  assert.deepEqual(a4Res.metrics.clippedEdges, []);
+
+  const clipped = createFramedBuffer(240, 240, [30, 30, 30]);
+  drawDocumentRect(clipped, 60, 50, 239, 239, [245, 245, 245]);
+  const clippedRes = cjsCore.analyzeDocumentFraming(clipped, "a4");
+  assert.equal(clippedRes.status, "poor");
+  assert.ok(clippedRes.metrics.clippedEdges.includes("right"));
+  assert.ok(clippedRes.metrics.clippedEdges.includes("bottom"));
+
+  const fullScan = createFramedBuffer(210, 297, [250, 250, 250]);
+  drawDocumentRect(fullScan, 18, 18, 192, 279, [250, 250, 250]);
+  const scanRes = cjsCore.analyzeDocumentFraming(fullScan, "a4");
+  assert.equal(scanRes.status, "good");
+  assert.equal(scanRes.metrics.isFullPageScan, true);
+});
+
+test("analyzeGlobalLaplacianBlur attaches framing analysis only when requested", () => {
+  const card = createFramedBuffer(180, 320, [36, 32, 30]);
+  for (let y = 0; y < 50; y++) {
+    for (let x = 0; x < 180; x++) {
+      const idx = (y * 180 + x) * 4;
+      card.data[idx] = 205;
+      card.data[idx + 1] = 152;
+      card.data[idx + 2] = 140;
+    }
+  }
+  drawDocumentRect(card, 5, 46, 174, 278, [216, 222, 204]);
+
+  const withoutFraming = cjsCore.analyzeGlobalLaplacianBlur(card);
+  assert.equal(withoutFraming.framing, undefined);
+
+  const offFraming = cjsCore.analyzeGlobalLaplacianBlur(card, { framing: "off" });
+  assert.equal(offFraming.framing, undefined);
+
+  const withFraming = cjsCore.analyzeGlobalLaplacianBlur(card, {
+    framing: "id-card",
+    locale: "en",
+  });
+  assert.ok(withFraming.framing);
+  assert.equal(withFraming.framing.status, "good");
+  assert.equal(withFraming.framing.profile, "id-card");
+});

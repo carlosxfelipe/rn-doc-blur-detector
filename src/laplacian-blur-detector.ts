@@ -1,3 +1,11 @@
+import {
+  analyzeDocumentFraming,
+  type DocumentFramingConfig,
+  type DocumentFramingProfile,
+  type DocumentFramingResult,
+  resolveFramingConfig,
+} from "./document-framing";
+
 /**
  * Pure TypeScript Document Blur Detector using Global Laplacian Variance.
  *
@@ -42,6 +50,8 @@ export interface LaplacianBlurConfig {
   minContentStdDev: number;
   locale?: BlurLocale;
   messages?: Partial<BlurAnalysisMessages>;
+  /** Optional document framing evaluation (`"off" | "auto" | "a4" | "id-card"` or full config). */
+  framing?: DocumentFramingProfile | Partial<DocumentFramingConfig>;
 }
 
 export interface BlurAnalysisMetrics {
@@ -57,6 +67,7 @@ export interface BlurAnalysisResult {
   reason: string;
   score: number;
   metrics: BlurAnalysisMetrics;
+  framing?: DocumentFramingResult;
 }
 
 export interface DocumentSummaryResult {
@@ -421,7 +432,7 @@ export function analyzeGlobalLaplacianBlur(
   const { width, height, data } = prepared;
   const { lum, contrast, stdDev } = toGrayscaleLuminance(data, width, height);
 
-  return computeLaplacianMetricsFromLuminance(
+  const result = computeLaplacianMetricsFromLuminance(
     lum,
     width,
     height,
@@ -430,6 +441,15 @@ export function analyzeGlobalLaplacianBlur(
     cfg,
     t0,
   );
+
+  if (cfg.framing) {
+    const resolvedFraming = resolveFramingConfig(cfg.framing, cfg.locale);
+    if (resolvedFraming.profile !== "off") {
+      result.framing = analyzeDocumentFraming(image, resolvedFraming);
+    }
+  }
+
+  return result;
 }
 
 /**

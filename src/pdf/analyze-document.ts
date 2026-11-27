@@ -6,6 +6,10 @@ import {
   type DocumentSummaryResult,
   type LaplacianBlurConfig,
 } from "../laplacian-blur-detector";
+import type {
+  DocumentFramingConfig,
+  DocumentFramingProfile,
+} from "../document-framing";
 import { extractImagePage, extractPdfPages } from "./document-loader";
 import type {
   AnalyzedDocumentItem,
@@ -90,6 +94,7 @@ export function buildAnalyzedDocument(
 
 export interface AnalyzeImageOptions extends ImageExtractOptions {
   config?: Partial<LaplacianBlurConfig>;
+  framing?: DocumentFramingProfile | Partial<DocumentFramingConfig>;
 }
 
 export interface AnalyzeImageResult {
@@ -99,6 +104,7 @@ export interface AnalyzeImageResult {
 
 export interface AnalyzePdfOptions extends PdfExtractOptions {
   config?: Partial<LaplacianBlurConfig>;
+  framing?: DocumentFramingProfile | Partial<DocumentFramingConfig>;
 }
 
 export interface AnalyzePdfResult {
@@ -117,16 +123,21 @@ export async function analyzeImage(
   source: ImageSourceInput,
   options: AnalyzeImageOptions = {},
 ): Promise<AnalyzeImageResult> {
+  const mergedConfig: Partial<LaplacianBlurConfig> | undefined =
+    options.framing !== undefined
+      ? { ...options.config, framing: options.framing }
+      : options.config;
+
   const maxDim =
     options.maxDim ??
-    options.config?.maxAnalysisDim ??
+    mergedConfig?.maxAnalysisDim ??
     DEFAULT_LAPLACIAN_CONFIG.maxAnalysisDim;
 
   const page = await extractImagePage(source, {
     maxDim,
     extractImageAdapter: options.extractImageAdapter,
   });
-  const analysis = analyzeGlobalLaplacianBlur(page.rgba, options.config);
+  const analysis = analyzeGlobalLaplacianBlur(page.rgba, mergedConfig);
   return { page, analysis };
 }
 
@@ -137,9 +148,14 @@ export async function analyzePdf(
   source: PdfSourceInput,
   options: AnalyzePdfOptions = {},
 ): Promise<AnalyzePdfResult> {
+  const mergedConfig: Partial<LaplacianBlurConfig> | undefined =
+    options.framing !== undefined
+      ? { ...options.config, framing: options.framing }
+      : options.config;
+
   const targetMaxDim =
     options.targetMaxDim ??
-    options.config?.maxAnalysisDim ??
+    mergedConfig?.maxAnalysisDim ??
     DEFAULT_LAPLACIAN_CONFIG.maxAnalysisDim;
 
   const pdfResult = await extractPdfPages(source, {
@@ -151,11 +167,11 @@ export async function analyzePdf(
   });
 
   const pageAnalyses = pdfResult.pages.map((page) =>
-    analyzeGlobalLaplacianBlur(page.rgba, options.config),
+    analyzeGlobalLaplacianBlur(page.rgba, mergedConfig),
   );
   const summary = aggregateDocumentResults(pageAnalyses, {
-    locale: options.config?.locale,
-    messages: options.config?.messages,
+    locale: mergedConfig?.locale,
+    messages: mergedConfig?.messages,
   });
 
   return {

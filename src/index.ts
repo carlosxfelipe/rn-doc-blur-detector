@@ -1,4 +1,17 @@
 export {
+  FRAMING_PROFILE_DEFAULTS,
+  analyzeDocumentFraming,
+  resolveFramingConfig,
+  type ActiveFramingProfile,
+  type DocumentFramingConfig,
+  type DocumentFramingMetrics,
+  type DocumentFramingProfile,
+  type DocumentFramingResult,
+  type FramingEdge,
+  type FramingStatus,
+  type NormalizedBoundingBox,
+} from "./document-framing";
+export {
   BLUR_MESSAGES_BY_LOCALE,
   DEFAULT_LAPLACIAN_CONFIG,
   aggregateDocumentResults,
