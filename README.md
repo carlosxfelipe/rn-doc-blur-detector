@@ -1,6 +1,6 @@
 # rn-doc-blur-detector
 
-Pure TypeScript/JavaScript core for client-side document and image blur detection (**Global Laplacian Variance**), compatible with any **React Native (Expo or Bare RN)**, **Web**, and **Node.js** project.
+Pure TypeScript/JavaScript core for client-side document and image blur detection (**Global Laplacian Variance**) and **document framing evaluation**, compatible with any **React Native (Expo or Bare RN)**, **Web**, and **Node.js** project.
 
 Zero `.tsx` files, zero coupled UI, and zero `expo-*` dependencies.
 
@@ -8,7 +8,7 @@ Zero `.tsx` files, zero coupled UI, and zero `expo-*` dependencies.
 
 | Import                     | Contents                                                                                                                                                                                         |
 | :------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `rn-doc-blur-detector`     | Laplacian blur detection engine + pure JS JPEG/Base64 decoder (`jpeg-js`)                                                                                                                        |
+| `rn-doc-blur-detector`     | Laplacian blur detection engine, document framing evaluator (`analyzeDocumentFraming`), and pure JS JPEG/Base64 decoder (`jpeg-js`)                                                              |
 | `rn-doc-blur-detector/pdf` | Cross-platform PDF and image extraction (`iOS/Android/Web`), `PDF_WEBVIEW_HTML` (vendored offline `pdfjs-dist@4.10.38` on iOS/Android), `createPdfBridgeController()`, and document/file helpers |
 
 ## Installation
@@ -49,7 +49,7 @@ const rgbaResult = analyzeGlobalLaplacianBlur(
   },
   {
     locale: "en", // "en" or "pt-BR" (default: "pt-BR"), or pass custom `messages`
-    framing: "auto", // optional: "off" | "auto" | "a4" | "id-card" | DocumentFramingConfig
+    framing: "auto", // optional: "off" | "auto" | "a4" | "id-card" | Partial<DocumentFramingConfig>
   },
 );
 
@@ -81,7 +81,17 @@ import { analyzeImage } from "rn-doc-blur-detector/pdf";
 
 const { analysis, page } = await analyzeImage(
   { uri: imageUri, base64: optionalJpegBase64 },
-  { config: { locale: "en" } },
+  {
+    framing: "id-card", // optional: "off" | "auto" | "a4" | "id-card" | Partial<DocumentFramingConfig>
+    config: { locale: "en" },
+  },
+);
+
+// `analysis.framing` is populated when `framing` is set and not `"off"`
+console.log(
+  analysis.status,
+  analysis.framing?.status,
+  analysis.framing?.metrics.boundingBox,
 );
 ```
 
@@ -123,6 +133,7 @@ const analyzeSelectedPdf = async (pdfUri: string) => {
     { uri: pdfUri }, // or { uri: "", base64 }
     {
       maxPages: 2, // pass Infinity for all pages
+      framing: "a4", // optional per-page framing check
       config: { locale: "en" },
       // Optional on iOS/Android: omit to use built-in fetch + FileReader for file:// and content:// URIs
       // readFileAsBase64: (uri) => ...,
@@ -202,6 +213,73 @@ const analyzed = buildAnalyzedDocument(
 );
 ```
 
+### 4. Document Framing (`framing` & `analyzeDocumentFraming`)
+
+Evaluate whether a document (such as an **ID card / RG / CNH** or **A4 sheet / contract**) is properly framed without clipped edges, excessive tilt, or low area coverage.
+
+#### Profiles
+
+- `"off"`: disables framing evaluation (default when `framing` is omitted from `LaplacianBlurConfig`).
+- `"auto"`: general rectangular documents (`minAreaCoverage: 0.25`, aspect ratio `1.12..2.05`).
+- `"a4"`: A4 sheets and contracts (`minAreaCoverage: 0.35`, aspect ratio `1.18..1.72`).
+- `"id-card"`: ID cards / CR80 / RG / CNH (`minAreaCoverage: 0.20`, aspect ratio `1.25..1.88`).
+
+You can also pass a partial `DocumentFramingConfig` object to override `locale`, `maxAnalysisDim`, `minAreaCoverage`, `minEdgeMarginRatio`, `maxCenterOffsetRatio`, `maxSkewDegrees`, `minAspectRatio`, or `maxAspectRatio`.
+
+#### Re-evaluating framing & drawing a preview overlay (as in `rn-doc-blur-detector-demo`)
+
+When keeping extracted pages (`ExtractedDocumentPage[]`) in state, you can switch framing profiles instantaneously on `page.rgba` via `resolveFramingConfig` + `analyzeDocumentFraming` and render `metrics.boundingBox` over the preview `<Image>`:
+
+```tsx
+import { useMemo } from "react";
+import { Image, View } from "react-native";
+import {
+  analyzeDocumentFraming,
+  type DocumentFramingProfile,
+  resolveFramingConfig,
+} from "rn-doc-blur-detector";
+import type { ExtractedDocumentPage } from "rn-doc-blur-detector/pdf";
+
+// Inside your component, given `activePage: ExtractedDocumentPage` and `framing: DocumentFramingProfile`:
+const resolvedFraming = useMemo(
+  () => resolveFramingConfig(framing, "en"), // "en" or "pt-BR" (default: "pt-BR")
+  [framing],
+);
+
+const framingResult = useMemo(() => {
+  if (resolvedFraming.profile === "off") return null;
+  return analyzeDocumentFraming(activePage.rgba, resolvedFraming);
+}, [activePage.rgba, resolvedFraming]);
+
+const box = framingResult?.metrics.boundingBox;
+
+// Wrap the <Image> in a container matching the rendered image dimensions (width × height):
+<View style={{ width: renderWidth, height: renderHeight }}>
+  <Image
+    source={{ uri: activePage.previewUri }}
+    resizeMode="contain"
+    style={{ width: "100%", height: "100%" }}
+  />
+  {framingResult && box && !framingResult.metrics.isFullPageScan ? (
+    <View
+      pointerEvents="none"
+      style={{
+        position: "absolute",
+        left: `${box.x * 100}%`,
+        top: `${box.y * 100}%`,
+        width: `${box.width * 100}%`,
+        height: `${box.height * 100}%`,
+        borderWidth: 2,
+        borderColor: framingResult.status === "good" ? "#15803D" : "#B91C1C",
+        borderRadius: 4,
+      }}
+    />
+  ) : null}
+</View>;
+```
+
+> **Note:** `analyzeDocumentFraming` operates on RGB contrast and edge gradients in pure JS/TS with zero native dependencies, so it works best when there is visual contrast between the document and the background surface.
+
 ---
 
 ## Configuration & Limits
@@ -216,10 +294,19 @@ const analyzed = buildAnalyzedDocument(
 
 ## Classification & Thresholds
 
+### Blur Status
+
 - `insufficient`: blank page or insufficient contrast (`contrast < 24` or `stdDev < 5.5`)
 - `blurry`: `score < 40`
 - `borderline`: `40 <= score < 60`
 - `sharp`: `score >= 60`
+
+### Framing Status
+
+- `insufficient`: invalid buffer, blank image, or insufficient contrast (`contrast < 20` or `stdDev < 4.5`)
+- `poor`: document clipped at one or more edges (`clippedEdges.length > 0`), too far (`areaCoverage < minAreaCoverage * 0.78`), not detected, or `score < 55`
+- `warning`: document tilted (`skewDegrees > maxSkewDegrees`), off-center (`centerOffset > maxCenterOffsetRatio`), unexpected aspect ratio for the selected profile, or `55 <= score < 80`
+- `good`: well-framed document (`score >= 80`, no issues) or clean full-page scan/PDF (`isFullPageScan: true`) with matching aspect ratio
 
 ## Build, Test & Packaging
 
