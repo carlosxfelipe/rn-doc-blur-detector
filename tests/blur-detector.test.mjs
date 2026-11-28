@@ -401,3 +401,213 @@ test("analyzeGlobalLaplacianBlur attaches framing analysis only when requested",
   assert.equal(withFraming.framing.status, "good");
   assert.equal(withFraming.framing.profile, "id-card");
 });
+
+function buildExifApp1Segment(orientation, littleEndian = true) {
+  // APP1 marker (2) + length (2) + "Exif\0\0" (6) + TIFF header (8) + IFD0 count (2) + 2 entries (24) + next IFD (4) = 48 bytes
+  const seg = new Uint8Array(48);
+  const view = new DataView(seg.buffer);
+
+  seg[0] = 0xff;
+  seg[1] = 0xe1;
+  view.setUint16(2, 46, false); // segment length excluding 0xFF 0xE1
+
+  // "Exif\0\0"
+  seg[4] = 0x45;
+  seg[5] = 0x78;
+  seg[6] = 0x69;
+  seg[7] = 0x66;
+  seg[8] = 0x00;
+  seg[9] = 0x00;
+
+  const tiff = 10;
+  seg[tiff] = littleEndian ? 0x49 : 0x4d;
+  seg[tiff + 1] = littleEndian ? 0x49 : 0x4d;
+  view.setUint16(tiff + 2, 0x002a, littleEndian);
+  view.setUint32(tiff + 4, 8, littleEndian); // IFD0 starts at tiff + 8
+
+  const ifd0 = tiff + 8;
+  view.setUint16(ifd0, 2, littleEndian); // 2 entries
+
+  // Entry 0: Make/Dummy tag 0x010F (ASCII, count 4)
+  view.setUint16(ifd0 + 2, 0x010f, littleEndian);
+  view.setUint16(ifd0 + 4, 2, littleEndian);
+  view.setUint32(ifd0 + 6, 4, littleEndian);
+  view.setUint32(ifd0 + 10, 0, littleEndian);
+
+  // Entry 1: Orientation tag 0x0112 (SHORT, count 1, value = orientation)
+  view.setUint16(ifd0 + 14, 0x0112, littleEndian);
+  view.setUint16(ifd0 + 16, 3, littleEndian);
+  view.setUint32(ifd0 + 18, 1, littleEndian);
+  view.setUint16(ifd0 + 22, orientation, littleEndian);
+
+  // Next IFD offset = 0
+  view.setUint32(ifd0 + 26, 0, littleEndian);
+  return seg;
+}
+
+function injectSegmentsAfterSoi(jpegBytes, segments) {
+  const extraLen = segments.reduce((sum, s) => sum + s.length, 0);
+  const out = new Uint8Array(jpegBytes.length + extraLen);
+  out.set(jpegBytes.subarray(0, 2), 0); // SOI 0xFF 0xD8
+  let offset = 2;
+  for (const seg of segments) {
+    out.set(seg, offset);
+    offset += seg.length;
+  }
+  out.set(jpegBytes.subarray(2), offset);
+  return out;
+}
+
+function getPixelRgb(buf, x, y) {
+  const idx = (y * buf.width + x) * 4;
+  return [buf.data[idx], buf.data[idx + 1], buf.data[idx + 2]];
+}
+
+function createQuadrantTestBuffer(width, height) {
+  const buf = createSolidRgba(width, height, 0, 0, 0);
+  const midX = Math.floor(width / 2);
+  const midY = Math.floor(height / 2);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = (y * width + x) * 4;
+      if (y < midY && x < midX) {
+        // Top-Left: Red
+        buf.data[idx] = 240;
+        buf.data[idx + 1] = 20;
+        buf.data[idx + 2] = 20;
+      } else if (y < midY && x >= midX) {
+        // Top-Right: Green
+        buf.data[idx] = 20;
+        buf.data[idx + 1] = 240;
+        buf.data[idx + 2] = 20;
+      } else if (y >= midY && x < midX) {
+        // Bottom-Left: Blue
+        buf.data[idx] = 20;
+        buf.data[idx + 1] = 20;
+        buf.data[idx + 2] = 240;
+      } else {
+        // Bottom-Right: Yellow
+        buf.data[idx] = 240;
+        buf.data[idx + 1] = 240;
+        buf.data[idx + 2] = 20;
+      }
+      buf.data[idx + 3] = 255;
+    }
+  }
+  return buf;
+}
+
+function dominantChannel(rgb) {
+  const [r, g, b] = rgb;
+  if (r > 180 && g > 180 && b < 80) return "Y";
+  if (r > 180 && g < 80 && b < 80) return "R";
+  if (g > 180 && r < 80 && b < 80) return "G";
+  if (b > 180 && r < 80 && g < 80) return "B";
+  return `?(${r},${g},${b})`;
+}
+
+test("readJpegExifOrientation handles missing, malformed, and both endiannesses", () => {
+  assert.equal(cjsCore.readJpegExifOrientation(new Uint8Array([1, 2, 3])), 1);
+
+  const img = createSolidRgba(16, 16, 100, 100, 100);
+  const plainJpeg = jpeg.encode(img, 90).data;
+  assert.equal(cjsCore.readJpegExifOrientation(plainJpeg), 1);
+
+  // Non-Exif APP1 (e.g. XMP) followed by Big-Endian Exif APP1
+  const xmpSeg = new Uint8Array([0xff, 0xe1, 0x00, 0x06, 0x58, 0x4d, 0x50, 0x00]);
+  const withBeExif = injectSegmentsAfterSoi(plainJpeg, [
+    xmpSeg,
+    buildExifApp1Segment(6, false),
+  ]);
+  assert.equal(cjsCore.readJpegExifOrientation(withBeExif), 6);
+
+  const withLeExif = injectSegmentsAfterSoi(plainJpeg, [
+    buildExifApp1Segment(8, true),
+  ]);
+  assert.equal(cjsCore.readJpegExifOrientation(withLeExif), 8);
+});
+
+test("decodeJpegBytesToRgba applies all EXIF orientations 1..8 accurately", () => {
+  // Raw image (32x16):
+  // TL = Red, TR = Green
+  // BL = Blue, BR = Yellow
+  const rawW = 32;
+  const rawH = 16;
+  const raw = createQuadrantTestBuffer(rawW, rawH);
+  const rawJpeg = jpeg.encode(raw, 95).data;
+
+  const expected = [
+    // [orientation, width, height, TL, TR, BL, BR]
+    [1, 32, 16, "R", "G", "B", "Y"],
+    [2, 32, 16, "G", "R", "Y", "B"],
+    [3, 32, 16, "Y", "B", "G", "R"],
+    [4, 32, 16, "B", "Y", "R", "G"],
+    [5, 16, 32, "R", "B", "G", "Y"],
+    [6, 16, 32, "B", "R", "Y", "G"],
+    [7, 16, 32, "Y", "G", "B", "R"],
+    [8, 16, 32, "G", "Y", "R", "B"],
+  ];
+
+  for (const [orientation, expW, expH, expTL, expTR, expBL, expBR] of expected) {
+    const littleEndian = orientation % 2 === 1;
+    const withExif = injectSegmentsAfterSoi(rawJpeg, [
+      buildExifApp1Segment(orientation, littleEndian),
+    ]);
+    const decoded = cjsCore.decodeJpegBytesToRgba(withExif);
+
+    assert.equal(decoded.width, expW, `width mismatch for orientation ${orientation}`);
+    assert.equal(decoded.height, expH, `height mismatch for orientation ${orientation}`);
+
+    const sampleMargin = 4;
+    const tl = dominantChannel(getPixelRgb(decoded, sampleMargin, sampleMargin));
+    const tr = dominantChannel(getPixelRgb(decoded, expW - 1 - sampleMargin, sampleMargin));
+    const bl = dominantChannel(getPixelRgb(decoded, sampleMargin, expH - 1 - sampleMargin));
+    const br = dominantChannel(
+      getPixelRgb(decoded, expW - 1 - sampleMargin, expH - 1 - sampleMargin),
+    );
+
+    assert.deepEqual(
+      [tl, tr, bl, br],
+      [expTL, expTR, expBL, expBR],
+      `quadrants mismatch for orientation ${orientation}`,
+    );
+  }
+});
+
+test("extractImagePage aligns portrait framing and clipped edges for EXIF-rotated landscape JPEGs", async () => {
+  // Raw landscape 240x160 with document clipped along the raw TOP edge (y = 0..130, x = 35..205).
+  // With EXIF Orientation = 6 (90° CW), visual image is portrait 160x240 and the clipped edge is RIGHT.
+  const raw = createFramedBuffer(240, 160, [32, 32, 32]);
+  drawDocumentRect(raw, 35, 0, 205, 130, [245, 245, 245]);
+
+  const rawJpeg = jpeg.encode(raw, 95).data;
+  const rotatedJpeg = injectSegmentsAfterSoi(rawJpeg, [
+    buildExifApp1Segment(6, true),
+  ]);
+  const base64 = cjsCore.uint8ArrayToBase64(rotatedJpeg);
+
+  const page = await cjsPdf.extractImagePage({
+    uri: "file:///galaxy-s22-photo.jpg",
+    base64,
+  });
+
+  assert.equal(page.width, 160);
+  assert.equal(page.height, 240);
+
+  const framing = cjsCore.analyzeDocumentFraming(page.rgba, "id-card");
+  assert.ok(framing.metrics.clippedEdges.includes("right"));
+  assert.ok(!framing.metrics.clippedEdges.includes("top"));
+  assert.ok(framing.metrics.boundingBox);
+  assert.ok(framing.metrics.boundingBox.x > 0.15);
+  assert.ok(
+    framing.metrics.boundingBox.x + framing.metrics.boundingBox.width > 0.95,
+  );
+
+  // Also verify data URI path + resizeRgbaIfNeeded receives EXIF-rotated portrait dimensions.
+  const resizedPage = await cjsPdf.extractImagePage(
+    { uri: `data:image/jpeg;base64,${base64}` },
+    120,
+  );
+  assert.equal(resizedPage.width, 80);
+  assert.equal(resizedPage.height, 120);
+});

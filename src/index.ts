@@ -31,9 +31,12 @@ export {
 export {
   analyzeJpegBase64Blur,
   analyzeJpegBytesBlur,
+  applyExifOrientation,
   base64ToUint8Array,
   decodeJpegBase64ToRgba,
   decodeJpegBytesToRgba,
   isJpegBytes,
+  readJpegExifOrientation,
   uint8ArrayToBase64,
+  type ExifOrientation,
 } from "./base64-jpeg";
